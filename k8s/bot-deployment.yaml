@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aid-bot
+  namespace: prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bot
+  template:
+    metadata:
+      labels:
+        app: bot
+    spec:
+      containers:
+      - name: bot
+        image: ghcr.io/your-username/aid-app:latest
+        env:
+        - name: TELEGRAM_BOT_TOKEN
+          valueFrom: { secretKeyRef: { name: my-secrets, key: bot-token } }
+        - name: QUEUE_URL
+          valueFrom: { secretKeyRef: { name: my-secrets, key: sqs-url } }
