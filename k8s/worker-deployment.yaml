@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aid-worker
+  namespace: prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+      - name: worker
+        image: ghcr.io/your-username/aid-app:latest
+        command: ["python", "worker.py"]
+        env:
+        - name: QUEUE_URL
+          valueFrom: { secretKeyRef: { name: my-secrets, key: sqs-url } }
+        - name: DYNAMODB_TABLE
+          valueFrom: { secretKeyRef: { name: my-secrets, key: dynamo-table } }
