@@ -22,7 +22,7 @@ jobs:
           SQS_URL: ${{ secrets.SQS_URL }}
           AWS_DEFAULT_REGION: "eu-west-1"
         run: |
-          echo "Starting the bot..."
+          echo "Starting the bot for testing (active for 10 minutes)..."
           python3 -m pip install -r app/requirements.txt
-          nohup python3 app/bot.py & 
-          sleep 10
+          # הפקודה הזו תריץ את הבוט ותשאיר את ה-Action פתוח למשך 10 דקות
+          timeout 600s python3 app/bot.py || echo "Testing timeframe finished"
