@@ -3,26 +3,28 @@ name: Build and Deploy
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Docker Image
-        run: docker build -t aid-app:latest ./app
-
-      - name: Run Bot Locally in Action
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyTelegramBotAPI boto3
+          
+      - name: Run Bot 24/7 Mode
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           SQS_URL: ${{ secrets.SQS_URL }}
-          AWS_DEFAULT_REGION: "eu-west-1"
         run: |
-          echo "Starting the bot for testing (active for 10 minutes)..."
-          python3 -m pip install -r app/requirements.txt
-          # הפקודה הזו תריץ את הבוט ותשאיר את ה-Action פתוח למשך 10 דקות
-          timeout 600s python3 app/bot.py || echo "Testing timeframe finished"
+          # הפקודה הזו אומרת למכונה לרוץ עד 360 דקות (6 שעות)
+          timeout 360m python app/bot.py || echo "Timeout reached"
