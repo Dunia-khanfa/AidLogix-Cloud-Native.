@@ -1,52 +1,94 @@
 import os, json, boto3, telebot, uuid
 from telebot import types
+from datetime import datetime
 
-# תיקון שמות המשתנים כדי שיתאימו בדיוק למה שהגדרת ב-GitHub Secrets
+# הגדרות ענן
 TOKEN = os.environ.get('TELEGRAM_TOKEN') 
 SQS_URL = os.environ.get('SQS_URL')
 REGION = "eu-west-1"
+TABLE_NAME = "AidLogixInventory"
 
-# בדיקת תקינות - אם אחד מהם חסר, הקוד יעצור ויסביר למה
-if not TOKEN:
-    raise ValueError("Missing TELEGRAM_TOKEN environment variable")
-if not SQS_URL:
-    raise ValueError("Missing SQS_URL environment variable")
-
+# חיבור ל-AWS
 sqs = boto3.client('sqs', region_name=REGION)
+dynamodb = boto3.resource('dynamodb', region_name=REGION)
+table = dynamodb.Table(TABLE_NAME)
+
 bot = telebot.TeleBot(TOKEN)
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🆘 Request Aid", "📦 Donate Items")
-    bot.send_message(message.chat.id, "AidLogix System Online. Select an option:", reply_markup=markup)
+# --- תפריטים ---
 
-@bot.message_handler(func=lambda m: m.text == "🆘 Request Aid")
-def ask_help(message):
-    msg = bot.send_message(message.chat.id, "Describe items and quantity (e.g., 50 Sleeping Bags):")
-    bot.register_next_step_handler(msg, send_to_queue, "NEED")
+def main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("🆘 Request Aid", "📦 Donate Items", "📊 My Status", "ℹ️ About System")
+    return markup
 
-@bot.message_handler(func=lambda m: m.text == "📦 Donate Items")
-def ask_donate(message):
-    msg = bot.send_message(message.chat.id, "What would you like to donate? (e.g., 20 Canned Foods):")
-    bot.register_next_step_handler(msg, send_to_queue, "DONATION")
+def categories_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("🏥 Medical Support", "🍕 Food & Water", "😴 Sleeping Gear", "🔙 Back to Main")
+    return markup
 
-def send_to_queue(message, action_type):
+# --- ניהול הודעות ---
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.send_message(
+        message.chat.id, 
+        f"שלום {message.from_user.first_name}!\nברוך הבא למערכת AidLogix - ניהול לוגיסטי חכם בזמן אמת.",
+        reply_markup=main_menu()
+    )
+
+@bot.message_handler(func=lambda m: m.text in ["🆘 Request Aid", "📦 Donate Items"])
+def select_category(message):
+    action_type = "NEED" if "Request" in message.text else "DONATION"
+    msg = bot.send_message(message.chat.id, "Select category:", reply_markup=categories_menu())
+    bot.register_next_step_handler(msg, ask_details, action_type)
+
+def ask_details(message, action_type):
+    if message.text == "🔙 Back to Main":
+        bot.send_message(message.chat.id, "Returning...", reply_markup=main_menu())
+        return
+
+    category = message.text
+    msg = bot.send_message(
+        message.chat.id, 
+        f"Selected: {category}\nPlease enter item description and quantity (e.g., 20 units):",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    bot.register_next_step_handler(msg, final_process, action_type, category)
+
+def final_process(message, action_type, category):
+    item_content = message.text
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp = datetime.now().strftime("%H:%M:%S | %d/%m/%Y")
+    
     try:
-        payload = {
-            "id": str(uuid.uuid4())[:8],
-            "user": message.from_user.username or "Guest",
-            "chat_id": message.chat.id,
-            "type": action_type,
-            "content": message.text
-        }
-        # שליחה ל-SQS
-        sqs.send_message(QueueUrl=SQS_URL, MessageBody=json.dumps(payload))
-        bot.reply_to(message, f"✅ Registered in Logistics Queue. ID: {payload['id']}")
+        # שמירה ב-DynamoDB עם קטגוריה
+        table.put_item(
+            Item={
+                'uid': unique_id,
+                'user': message.from_user.username or "Guest",
+                'type': action_type,
+                'category': category,
+                'content': item_content,
+                'timestamp': timestamp,
+                'status': 'Open'
+            }
+        )
+        
+        # הודעת סיכום מעוצבת למשתמש
+        response = (
+            f"✅ **Entry Confirmed!**\n\n"
+            f"🆔 **ID:** `{unique_id}`\n"
+            f"📂 **Category:** {category}\n"
+            f"📝 **Details:** {item_content}\n"
+            f"🕒 **Time:** {timestamp}\n\n"
+            f"Our logistics team has been notified via SQS."
+        )
+        
+        bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=main_menu())
+        
     except Exception as e:
-        bot.reply_to(message, "❌ Error connecting to cloud logistics.")
-        print(f"Error: {e}")
+        bot.send_message(message.chat.id, "⚠️ Error connecting to AWS. Please check logs.", reply_markup=main_menu())
 
 if __name__ == "__main__":
-    print("Bot is starting...")
     bot.polling(none_stop=True)
